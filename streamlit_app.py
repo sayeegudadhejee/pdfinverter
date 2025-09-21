@@ -1,5 +1,8 @@
 import streamlit as st
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    import pymupdf as fitz
 from PIL import Image, ImageOps
 import io
 import zipfile
@@ -301,4 +304,5 @@ def main():
         st.markdown("**💡 Tip:** Upload your PDFs above to get started!")
 
 if __name__ == "__main__":
+
     main()
