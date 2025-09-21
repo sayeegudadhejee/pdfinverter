@@ -4,9 +4,21 @@ import io
 import zipfile
 from pathlib import Path
 import base64
-import fitz  # PyMuPDF
 import tempfile
 import os
+
+# Try to import PyMuPDF with fallback
+try:
+    import fitz  # PyMuPDF
+    PDF_SUPPORT = True
+except ImportError:
+    try:
+        import pymupdf as fitz
+        PDF_SUPPORT = True
+    except ImportError:
+        PDF_SUPPORT = False
+        st.error("⚠️ PDF processing not available. PyMuPDF not installed. Only image files are supported.")
+        st.info("To enable PDF support, install PyMuPDF: `pip install PyMuPDF`")
 
 # Page config
 st.set_page_config(
@@ -66,6 +78,10 @@ st.markdown("""
 @st.cache_data
 def convert_pdf_to_images(pdf_bytes, dpi=200):
     """Convert PDF to images using PyMuPDF"""
+    if not PDF_SUPPORT:
+        st.error("PDF processing not available. Please upload images instead.")
+        return []
+    
     try:
         # Open PDF from bytes
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -199,13 +215,22 @@ def main():
     """)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # File uploader - now includes PDF support
-    st.markdown("### 📁 Upload PDF or Image Files")
+    # File uploader - conditional PDF support based on availability
+    supported_types = ['png', 'jpg', 'jpeg', 'bmp', 'tiff']
+    if PDF_SUPPORT:
+        supported_types.insert(0, 'pdf')
+        file_help_text = "Upload PDF files, images from PDF pages, screenshots, or any image files with dark backgrounds."
+        upload_title = "### 📁 Upload PDF or Image Files"
+    else:
+        file_help_text = "Upload images, screenshots, or any image files with dark backgrounds. PDF support requires PyMuPDF installation."
+        upload_title = "### 📁 Upload Image Files"
+    
+    st.markdown(upload_title)
     uploaded_files = st.file_uploader(
-        "Choose PDF or image files to invert colors",
-        type=['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'tiff'],
+        "Choose files to invert colors",
+        type=supported_types,
         accept_multiple_files=True,
-        help="Upload PDF files, images from PDF pages, screenshots, or any image files with dark backgrounds."
+        help=file_help_text
     )
     
     if uploaded_files:
@@ -262,8 +287,8 @@ def main():
                 help="Choose output file format"
             )
         
-        # PDF-specific options
-        if pdf_files:
+        # PDF-specific options - only show if PDF support is available
+        if pdf_files and PDF_SUPPORT:
             st.markdown("### 📄 PDF Processing Options")
             col1, col2 = st.columns([1, 1])
             
@@ -296,7 +321,7 @@ def main():
             
             # Count PDF pages for progress
             pdf_page_count = 0
-            if pdf_files:
+            if pdf_files and PDF_SUPPORT:
                 for pdf_file in pdf_files:
                     try:
                         pdf_file.seek(0)
@@ -315,8 +340,8 @@ def main():
             processed_files = {}
             current_operation = 0
             
-            # Process PDF files first
-            if pdf_files:
+            # Process PDF files first - only if PDF support is available
+            if pdf_files and PDF_SUPPORT:
                 for pdf_file in pdf_files:
                     status_text.text(f"Converting PDF: {pdf_file.name}...")
                     
