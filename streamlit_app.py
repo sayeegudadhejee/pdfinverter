@@ -1,21 +1,15 @@
 import streamlit as st
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    import pymupdf as fitz
 from PIL import Image, ImageOps
 import io
 import zipfile
 from pathlib import Path
-import tempfile
-import os
+import base64
 
 # Page config
 st.set_page_config(
     page_title="PDF Color Inverter",
     page_icon="🖨️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # Custom CSS
@@ -33,6 +27,13 @@ st.markdown("""
         font-size: 1.2rem;
         margin-bottom: 2rem;
     }
+    .upload-box {
+        border: 2px dashed #ccc;
+        border-radius: 10px;
+        padding: 2rem;
+        text-align: center;
+        margin: 2rem 0;
+    }
     .success-box {
         background-color: #d4edda;
         border: 1px solid #c3e6cb;
@@ -40,132 +41,135 @@ st.markdown("""
         padding: 1rem;
         margin: 1rem 0;
     }
-    .info-box {
-        background-color: #d1ecf1;
-        border: 1px solid #bee5eb;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-def invert_pdf_colors(pdf_bytes, filename):
-    """Invert colors in a PDF file"""
+def process_image_file(image_bytes, filename):
+    """Process image files and invert colors"""
     try:
-        # Open PDF from bytes
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        # Open image
+        image = Image.open(io.BytesIO(image_bytes))
         
-        # Create new PDF document
-        new_doc = fitz.open()
+        # Convert to RGB if needed
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            
-            # Get page as image (high resolution)
-            mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for quality
-            pix = page.get_pixmap(matrix=mat)
-            
-            # Convert to PIL Image
-            img_data = pix.tobytes("ppm")
-            pil_image = Image.open(io.BytesIO(img_data))
-            
-            # Invert colors
-            inverted_image = ImageOps.invert(pil_image.convert('RGB'))
-            
-            # Convert back to bytes
-            img_bytes = io.BytesIO()
-            inverted_image.save(img_bytes, format='PNG')
-            img_bytes.seek(0)
-            
-            # Create new page with inverted image
-            new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
-            
-            # Insert the inverted image
-            img_rect = fitz.Rect(0, 0, page.rect.width, page.rect.height)
-            new_page.insert_image(img_rect, stream=img_bytes.getvalue())
+        # Invert colors
+        inverted_image = ImageOps.invert(image)
         
         # Save to bytes
-        output_bytes = new_doc.tobytes()
-        new_doc.close()
-        doc.close()
+        output_buffer = io.BytesIO()
         
-        return output_bytes
+        # Determine format from filename
+        file_ext = Path(filename).suffix.lower()
+        if file_ext in ['.jpg', '.jpeg']:
+            format_type = 'JPEG'
+        elif file_ext == '.png':
+            format_type = 'PNG'
+        elif file_ext == '.pdf':
+            format_type = 'PDF'
+        else:
+            format_type = 'PNG'  # Default
+        
+        inverted_image.save(output_buffer, format=format_type)
+        output_buffer.seek(0)
+        
+        return output_buffer.getvalue()
         
     except Exception as e:
         st.error(f"Error processing {filename}: {str(e)}")
         return None
 
 def create_download_zip(processed_files):
-    """Create a ZIP file containing all processed PDFs"""
+    """Create a ZIP file containing all processed files"""
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for filename, pdf_bytes in processed_files.items():
-            zip_file.writestr(filename, pdf_bytes)
+        for filename, file_bytes in processed_files.items():
+            zip_file.writestr(filename, file_bytes)
     
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-# Main app
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🖨️ PDF Color Inverter</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Save ink by inverting PDF colors for printing</p>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🖨️ Image Color Inverter</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Save ink by inverting image colors for printing</p>', unsafe_allow_html=True)
     
-    # Sidebar info
-    with st.sidebar:
-        st.markdown("### 📋 How it works")
+    # Info section
+    st.markdown("### 🎯 How It Works")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
         st.markdown("""
-        1. **Upload** your PDF files
-        2. **Process** to invert colors
-        3. **Download** ink-saving PDFs
-        
-        **Benefits:**
-        - 🖨️ Save up to 90% ink
-        - 💰 Reduce printing costs
-        - 🌱 Environmentally friendly
-        - ⚡ Fast batch processing
+        **📤 Upload**
+        - Images (PNG, JPG)
+        - Screenshots
+        - Scanned documents
         """)
-        
-        st.markdown("### 💡 Best for:")
+    
+    with col2:
         st.markdown("""
-        - Dark background documents
-        - Presentation slides
-        - Code documentation
-        - Academic papers
-        - Any high-contrast content
+        **🔄 Process**
+        - Invert all colors
+        - Dark → Light
+        - Light → Dark
         """)
+    
+    with col3:
+        st.markdown("""
+        **💾 Download**
+        - Individual files
+        - ZIP bundle
+        - Ready to print!
+        """)
+    
+    st.markdown("---")
     
     # File uploader
-    st.markdown("### 📁 Upload PDF Files")
+    st.markdown("### 📁 Upload Image Files")
     uploaded_files = st.file_uploader(
-        "Choose PDF files to invert colors",
-        type=['pdf'],
+        "Choose image files to invert colors",
+        type=['png', 'jpg', 'jpeg'],
         accept_multiple_files=True,
-        help="Select one or more PDF files. Dark backgrounds will become white, saving ink when printing."
+        help="Upload PNG, JPG, or JPEG files. Dark backgrounds will become white to save ink."
     )
     
     if uploaded_files:
         st.markdown(f"**{len(uploaded_files)} file(s) selected:**")
+        
+        # Show preview of uploaded files
+        cols = st.columns(min(len(uploaded_files), 4))
+        for i, file in enumerate(uploaded_files):
+            with cols[i % 4]:
+                try:
+                    image = Image.open(file)
+                    st.image(image, caption=file.name, use_column_width=True)
+                    file_size_mb = file.size / (1024 * 1024)
+                    st.caption(f"{file_size_mb:.1f} MB")
+                except:
+                    st.write(f"📄 {file.name}")
+        
+        # Reset file pointers
         for file in uploaded_files:
-            st.write(f"📄 {file.name} ({file.size:,} bytes)")
+            file.seek(0)
         
         # Processing options
+        st.markdown("### ⚙️ Processing Options")
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            quality = st.selectbox(
-                "Output Quality",
-                ["High (2x resolution)", "Standard (1x resolution)"],
-                help="Higher quality takes longer but produces better results"
+            naming = st.selectbox(
+                "Output File Naming",
+                ["Add '_inverted' suffix", "Add '_ink_saver' suffix", "Add '_print_ready' suffix"],
+                help="How to name the processed files"
             )
         
         with col2:
-            naming = st.selectbox(
-                "File Naming",
-                ["Add '_inverted' suffix", "Add '_ink_saver' suffix", "Add '_print_ready' suffix"],
-                help="How to name the processed files"
+            output_format = st.selectbox(
+                "Output Format",
+                ["Keep original format", "Convert all to PNG", "Convert all to JPG"],
+                help="Choose output file format"
             )
         
         # Process button
@@ -184,23 +188,34 @@ def main():
                 status_text.text(f"Processing {uploaded_file.name}...")
                 
                 # Get file bytes
-                pdf_bytes = uploaded_file.read()
+                file_bytes = uploaded_file.read()
                 
-                # Process the PDF
-                inverted_pdf = invert_pdf_colors(pdf_bytes, uploaded_file.name)
+                # Process the image
+                inverted_image = process_image_file(file_bytes, uploaded_file.name)
                 
-                if inverted_pdf:
+                if inverted_image:
                     # Generate output filename
                     base_name = Path(uploaded_file.name).stem
+                    original_ext = Path(uploaded_file.name).suffix
+                    
+                    # Determine suffix
                     suffix_map = {
                         "Add '_inverted' suffix": "_inverted",
                         "Add '_ink_saver' suffix": "_ink_saver", 
                         "Add '_print_ready' suffix": "_print_ready"
                     }
                     suffix = suffix_map[naming]
-                    output_filename = f"{base_name}{suffix}.pdf"
                     
-                    processed_files[output_filename] = inverted_pdf
+                    # Determine extension
+                    if output_format == "Convert all to PNG":
+                        ext = ".png"
+                    elif output_format == "Convert all to JPG":
+                        ext = ".jpg"
+                    else:
+                        ext = original_ext
+                    
+                    output_filename = f"{base_name}{suffix}{ext}"
+                    processed_files[output_filename] = inverted_image
             
             # Complete progress
             progress_bar.progress(1.0)
@@ -208,20 +223,36 @@ def main():
             
             if processed_files:
                 st.markdown('<div class="success-box">', unsafe_allow_html=True)
-                st.success(f"🎉 Successfully processed {len(processed_files)} PDF files!")
+                st.success(f"🎉 Successfully processed {len(processed_files)} image files!")
                 st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Show before/after preview
+                st.markdown("### 🔍 Before & After Preview")
+                if len(uploaded_files) > 0:
+                    preview_file = uploaded_files[0]
+                    preview_file.seek(0)
+                    original_image = Image.open(preview_file)
+                    inverted_preview = ImageOps.invert(original_image.convert('RGB'))
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Before (Original)**")
+                        st.image(original_image, use_column_width=True)
+                    with col2:
+                        st.markdown("**After (Inverted)**")
+                        st.image(inverted_preview, use_column_width=True)
                 
                 # Download options
                 st.markdown("### 📥 Download Results")
                 
                 if len(processed_files) == 1:
                     # Single file download
-                    filename, pdf_bytes = next(iter(processed_files.items()))
+                    filename, file_bytes = next(iter(processed_files.items()))
                     st.download_button(
                         label=f"📄 Download {filename}",
-                        data=pdf_bytes,
+                        data=file_bytes,
                         file_name=filename,
-                        mime="application/pdf",
+                        mime="image/png",
                         use_container_width=True
                     )
                 else:
@@ -234,7 +265,7 @@ def main():
                         st.download_button(
                             label=f"📦 Download All as ZIP ({len(processed_files)} files)",
                             data=zip_data,
-                            file_name="inverted_pdfs.zip",
+                            file_name="inverted_images.zip",
                             mime="application/zip",
                             use_container_width=True
                         )
@@ -251,58 +282,66 @@ def main():
                                 label=f"📄 Download {selected_file}",
                                 data=processed_files[selected_file],
                                 file_name=selected_file,
-                                mime="application/pdf",
+                                mime="image/png",
                                 use_container_width=True
                             )
                 
-                # Show preview info
-                st.markdown("### 🔍 What Changed?")
-                st.markdown('<div class="info-box">', unsafe_allow_html=True)
+                # Show what changed
+                st.markdown("### ✨ What Changed?")
                 st.info("""
                 **Color Inversion Applied:**
-                - Black backgrounds → White backgrounds
-                - White text → Black text  
+                - Black backgrounds → White backgrounds  
+                - White text → Black text
                 - Dark colors → Light colors
-                - Perfect for ink-saving printing!
+                - Perfect for ink-saving printing! 🖨️💰
                 """)
-                st.markdown('</div>', unsafe_allow_html=True)
             
             else:
-                st.error("❌ No files were successfully processed. Please check your PDF files and try again.")
+                st.error("❌ No files were successfully processed. Please check your image files and try again.")
     
     else:
-        # Show example/demo info
-        st.markdown("### 🎯 Perfect for Saving Ink!")
+        # Show upload area
+        st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+        st.markdown("""
+        ### 📤 Ready to Save Ink?
         
+        **Perfect for:**
+        - Screenshots with dark themes
+        - Presentation slides with dark backgrounds  
+        - Code snippets with syntax highlighting
+        - Any image that would waste ink when printing
+        
+        **Drag and drop your images above or click to browse!**
+        """)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Example benefits
+        st.markdown("### 💡 Why Invert Colors?")
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.markdown("""
-            **📊 Presentations**
-            - Dark slide backgrounds
-            - High contrast themes
-            - Corporate templates
+            **💰 Save Money**
+            - Up to 90% less ink usage
+            - Reduce printing costs
+            - Extend cartridge life
             """)
         
         with col2:
             st.markdown("""
-            **💻 Code Documents**
-            - Dark IDE themes
-            - Syntax highlighting
-            - Technical documentation
+            **🌱 Eco-Friendly**
+            - Less ink waste
+            - Fewer cartridge replacements
+            - Reduce environmental impact
             """)
         
         with col3:
             st.markdown("""
-            **📚 Academic Papers**
-            - Dark backgrounds
-            - Highlighted sections
-            - Research documents
+            **📖 Better Reading**
+            - Dark text on white background
+            - Easier on the eyes
+            - Professional appearance
             """)
-        
-        st.markdown("---")
-        st.markdown("**💡 Tip:** Upload your PDFs above to get started!")
 
 if __name__ == "__main__":
-
     main()
