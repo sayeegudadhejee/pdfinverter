@@ -7,18 +7,37 @@ import base64
 import tempfile
 import os
 
-# Try to import PyMuPDF with fallback
+# Try to import PDF processing libraries with multiple fallbacks
+PDF_SUPPORT = False
+PDF_LIBRARY = None
+
+# Method 1: Try pdf2image (works better on cloud platforms)
 try:
-    import fitz  # PyMuPDF
+    from pdf2image import convert_from_bytes
     PDF_SUPPORT = True
+    PDF_LIBRARY = "pdf2image"
 except ImportError:
+    # Method 2: Try PyMuPDF
     try:
-        import pymupdf as fitz
+        import fitz
         PDF_SUPPORT = True
+        PDF_LIBRARY = "pymupdf"
     except ImportError:
-        PDF_SUPPORT = False
-        st.error("⚠️ PDF processing not available. PyMuPDF not installed. Only image files are supported.")
-        st.info("To enable PDF support, install PyMuPDF: `pip install PyMuPDF`")
+        try:
+            import pymupdf as fitz
+            PDF_SUPPORT = True
+            PDF_LIBRARY = "pymupdf"
+        except ImportError:
+            pass
+
+if not PDF_SUPPORT:
+    st.warning("⚠️ PDF processing not available. Only image files are supported.")
+    st.info("""
+    **To enable PDF support, you can:**
+    1. Convert your PDF to images using online tools like [SmallPDF](https://smallpdf.com/pdf-to-jpg)
+    2. Upload the images directly to this app
+    3. Or take screenshots of your PDF pages
+    """)
 
 # Page config
 st.set_page_config(
@@ -77,37 +96,45 @@ st.markdown("""
 
 @st.cache_data
 def convert_pdf_to_images(pdf_bytes, dpi=200):
-    """Convert PDF to images using PyMuPDF"""
+    """Convert PDF to images using available PDF library"""
     if not PDF_SUPPORT:
         st.error("PDF processing not available. Please upload images instead.")
         return []
     
     try:
-        # Open PDF from bytes
-        pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-        images = []
-        
-        for page_num in range(len(pdf_document)):
-            # Get page
-            page = pdf_document[page_num]
+        if PDF_LIBRARY == "pdf2image":
+            # Use pdf2image (more reliable on cloud platforms)
+            images_pil = convert_from_bytes(
+                pdf_bytes, 
+                dpi=dpi,
+                fmt='PNG',
+                thread_count=1  # Avoid threading issues on cloud
+            )
             
-            # Create matrix for scaling (DPI conversion)
-            mat = fitz.Matrix(dpi/72, dpi/72)
+            images = []
+            for i, img in enumerate(images_pil):
+                images.append((img, f"page_{i + 1}"))
             
-            # Render page as image
-            pix = page.get_pixmap(matrix=mat)
+            return images
             
-            # Convert to PIL Image
-            img_data = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_data))
+        elif PDF_LIBRARY == "pymupdf":
+            # Use PyMuPDF as fallback
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            images = []
             
-            images.append((img, f"page_{page_num + 1}"))
-        
-        pdf_document.close()
-        return images
+            for page_num in range(len(pdf_document)):
+                page = pdf_document[page_num]
+                mat = fitz.Matrix(dpi/72, dpi/72)
+                pix = page.get_pixmap(matrix=mat)
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data))
+                images.append((img, f"page_{page_num + 1}"))
+            
+            pdf_document.close()
+            return images
     
     except Exception as e:
-        st.error(f"Error converting PDF: {str(e)}")
+        st.error(f"Error converting PDF with {PDF_LIBRARY}: {str(e)}")
         return []
 
 def process_image_file(image_bytes, filename):
@@ -176,43 +203,86 @@ def main():
     # Sidebar info
     with st.sidebar:
         st.markdown("### 📋 How it works")
-        st.markdown("""
-        1. **Upload** PDF or image files directly
-        2. **Convert** PDF pages to images automatically
-        3. **Process** to invert colors
-        4. **Download** ink-saving images
+        if PDF_SUPPORT:
+            st.markdown(f"""
+            1. **Upload** PDF or image files directly
+            2. **Convert** PDF pages to images automatically (using {PDF_LIBRARY})
+            3. **Process** to invert colors
+            4. **Download** ink-saving images
+            
+            **Benefits:**
+            - 🖨️ Save up to 90% ink
+            - 💰 Reduce printing costs
+            - 🌱 Environmentally friendly
+            - ⚡ Fast processing
+            - 📄 Direct PDF support!
+            """)
+        else:
+            st.markdown("""
+            1. **Convert** PDF to images first (using online tools)
+            2. **Upload** the images here
+            3. **Process** to invert colors
+            4. **Download** ink-saving images
+            
+            **Benefits:**
+            - 🖨️ Save up to 90% ink
+            - 💰 Reduce printing costs
+            - 🌱 Environmentally friendly
+            - ⚡ Fast processing
+            """)
         
-        **Benefits:**
-        - 🖨️ Save up to 90% ink
-        - 💰 Reduce printing costs
-        - 🌱 Environmentally friendly
-        - ⚡ Fast processing
-        - 📄 Direct PDF support!
-        """)
-        
-        st.markdown("### ⚙️ PDF Settings")
-        dpi_setting = st.selectbox(
-            "Image Quality (DPI)",
-            [150, 200, 300],
-            index=1,
-            help="Higher DPI = better quality but larger files"
-        )
+        if PDF_SUPPORT:
+            st.markdown("### ⚙️ PDF Settings")
+            dpi_setting = st.selectbox(
+                "Image Quality (DPI)",
+                [150, 200, 300],
+                index=1,
+                help="Higher DPI = better quality but larger files"
+            )
+        else:
+            dpi_setting = 200  # Default value when PDF support is not available
+            st.markdown("### 🔧 PDF to Image Tools")
+            st.markdown("""
+            **Online converters:**
+            - [SmallPDF](https://smallpdf.com/pdf-to-jpg)
+            - [ILovePDF](https://www.ilovepdf.com/pdf_to_jpg)
+            - [PDF24](https://tools.pdf24.org/en/pdf-to-images)
+            
+            **Or use screenshots!**
+            """)
         
         st.markdown("### 💡 Pro Tips")
-        st.markdown("""
-        - **PDF files**: Upload directly - no conversion needed!
-        - **Large PDFs**: May take a moment to process
-        - **Images**: PNG, JPG, screenshots all supported
-        - **Best results**: Dark backgrounds with light text
-        """)
+        if PDF_SUPPORT:
+            st.markdown("""
+            - **PDF files**: Upload directly - no conversion needed!
+            - **Large PDFs**: May take a moment to process
+            - **Images**: PNG, JPG, screenshots all supported
+            - **Best results**: Dark backgrounds with light text
+            """)
+        else:
+            st.markdown("""
+            - **Convert PDFs**: Use online tools first
+            - **Screenshots**: Work perfectly!
+            - **Images**: PNG, JPG all supported
+            - **Best results**: Dark backgrounds with light text
+            """)
     
     # Main instructions
     st.markdown('<div class="info-box">', unsafe_allow_html=True)
-    st.info("""
-    **🆕 New Feature:** Upload PDF files directly! The app will automatically convert them to images and invert colors.
-    
-    **Supported formats:** PDF, PNG, JPG, JPEG, BMP, TIFF
-    """)
+    if PDF_SUPPORT:
+        st.info(f"""
+        **✅ PDF Support Active** (using {PDF_LIBRARY}): Upload PDF files directly! The app will automatically convert them to images and invert colors.
+        
+        **Supported formats:** PDF, PNG, JPG, JPEG, BMP, TIFF
+        """)
+    else:
+        st.info("""
+        **📄 For PDF files:** First convert your PDF to images using any online PDF-to-image converter, then upload the images here.
+        
+        **🖼️ For images:** Upload PNG, JPG, or screenshots directly!
+        
+        **Supported formats:** PNG, JPG, JPEG, BMP, TIFF
+        """)
     st.markdown('</div>', unsafe_allow_html=True)
     
     # File uploader - conditional PDF support based on availability
@@ -300,17 +370,24 @@ def main():
                 )
             
             with col2:
-                if len(pdf_files) == 1:
+                if len(pdf_files) == 1 and PDF_SUPPORT:
                     # Show page count if single PDF
                     try:
                         pdf_file = pdf_files[0]
                         pdf_file.seek(0)
                         pdf_bytes = pdf_file.read()
-                        pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        page_count = len(pdf_doc)
-                        pdf_doc.close()
+                        
+                        if PDF_LIBRARY == "pdf2image":
+                            from pdf2image import pdfinfo_from_bytes
+                            info = pdfinfo_from_bytes(pdf_bytes)
+                            page_count = info.get("Pages", "Unknown")
+                        elif PDF_LIBRARY == "pymupdf":
+                            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            page_count = len(pdf_doc)
+                            pdf_doc.close()
+                        
                         st.info(f"📄 PDF has {page_count} pages")
-                    except:
+                    except Exception as e:
                         st.info("📄 PDF ready for processing")
         
         # Process button
@@ -326,10 +403,17 @@ def main():
                     try:
                         pdf_file.seek(0)
                         pdf_bytes = pdf_file.read()
-                        pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                        pdf_page_count += len(pdf_doc)
-                        pdf_doc.close()
-                    except:
+                        
+                        if PDF_LIBRARY == "pdf2image":
+                            from pdf2image import pdfinfo_from_bytes
+                            info = pdfinfo_from_bytes(pdf_bytes)
+                            pdf_page_count += info.get("Pages", 0)
+                        elif PDF_LIBRARY == "pymupdf":
+                            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                            pdf_page_count += len(pdf_doc)
+                            pdf_doc.close()
+                    except Exception as e:
+                        st.warning(f"Could not count pages in {pdf_file.name}: {e}")
                         pass
             
             total_operations += pdf_page_count
